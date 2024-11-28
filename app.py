@@ -7,6 +7,7 @@ import os
 import cv2
 import numpy as np
 import time
+import base64
 
 app = Flask(__name__)
 CORS(app)
@@ -80,6 +81,49 @@ def process_video_feed(frame, model, frames_buffer, segment_frames=42):
         logger.error(f"Error in process_video_feed: {str(e)}")
         return None, 0.0
 
+@app.route('/api/webcam/predict', methods=['POST'])
+def predict_webcam():
+    if model is None:
+        return jsonify({
+            'error': 'Model not loaded'
+        }), 400
+
+    try:
+        # Get base64 frame from request
+        frame_data = request.json.get('frame')
+        if not frame_data:
+            return jsonify({
+                'error': 'No frame data provided'
+            }), 400
+
+        # Decode base64 frame
+        frame_bytes = base64.b64decode(frame_data)
+        np_arr = np.frombuffer(frame_bytes, np.uint8)
+        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+
+        # Process frame
+        predicted_class, confidence = process_video_feed(
+            frame, model, frames_buffer, SEGMENT_FRAMES
+        )
+        print("hello : ",predicted_class)
+        if predicted_class is not None:
+            return jsonify({
+                'predicted_class': int(predicted_class),
+                'confidence': float(confidence)
+            })
+        else:
+            return jsonify({
+                'status': 'collecting_frames',
+                'frames_collected': len(frames_buffer),
+                'frames_required': SEGMENT_FRAMES
+            })
+
+    except Exception as e:
+        logger.error(f"Error processing webcam frame: {str(e)}")
+        return jsonify({
+            'error': f'Error processing frame: {str(e)}'
+        }), 500
+    
 @app.route('/api/model/load', methods=['GET'])
 def load_model():
     global model

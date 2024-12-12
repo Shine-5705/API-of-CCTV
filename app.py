@@ -3,12 +3,18 @@ from flask_cors import CORS
 import tensorflow as tf
 from tensorflow import keras
 import logging
+from twilio.rest import Client
 import os
 import cv2
 import numpy as np
 import time
 import base64
+from datetime import datetime
 
+TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')
+TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')
+TWILIO_PHONE_NUMBER = os.getenv('TWILIO_PHONE_NUMBER')
+EMERGENCY_NUMBER = os.getenv('EMERGENCY_NUMBER')
 app = Flask(__name__)
 CORS(app)
 
@@ -40,6 +46,39 @@ def f1_m(y_true, y_pred):
     precision = precision_m(y_true, y_pred)
     recall = recall_m(y_true, y_pred)
     return 2*((precision*recall)/(precision+recall+tf.keras.backend.epsilon()))
+
+def send_emergency_alert(detection_type="webcam", location="Unknown"):
+  """Send both SMS and voice call for emergency alert"""
+  try:
+      client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+      
+      # Send SMS
+      message_text = (f"⚠️ EMERGENCY ALERT! Fight detected via {detection_type} "
+                     f"at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} "
+                     f"Location: {location}")
+      
+      message = client.messages.create(
+          body=message_text,
+          from_=TWILIO_PHONE_NUMBER,
+          to=EMERGENCY_NUMBER
+      )
+      logging.info(f"SMS sent successfully! SID: {message.sid}")
+      
+      # Make voice call
+      call = client.calls.create(
+          twiml=f'<Response><Say>Emergency! Fight detected via {detection_type}. '
+                f'Please check the location immediately.</Say></Response>',
+          from_=TWILIO_PHONE_NUMBER,
+          to=EMERGENCY_NUMBER
+      )
+      logging.info(f"Call initiated! SID: {call.sid}")
+      
+      return True
+      
+  except Exception as e:
+      logging.error(f"Error sending emergency alert: {str(e)}")
+      return False
+
 
 def process_video_feed(frame, model, frames_buffer, segment_frames=42):
     """Process video frame and make prediction with enhanced debugging"""
@@ -106,6 +145,8 @@ def predict_webcam():
             frame, model, frames_buffer, SEGMENT_FRAMES
         )
         print("hello : ",predicted_class)
+        if(predicted_class==1):
+            send_emergency_alert("webcam")
         if predicted_class is not None:
             return jsonify({
                 'predicted_class': int(predicted_class),
@@ -215,7 +256,10 @@ def monitor_video_file(video_data):
                     'fight_probability': float(prediction[0][1]),
                     'no_fight_probability': float(prediction[0][0])
                 })
-                
+                if(np.argmax(prediction)==1):
+                    send_emergency_alert("temp_path")
+
+                print(prediction)
                 frames = frames[SEGMENT_FRAMES//2:]  # Overlap segments
         
         cap.release()

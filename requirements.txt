@@ -1,3 +1,4 @@
 flask
 flask_cors
 tensorflow>=2.0.0
+twilio
